@@ -27,6 +27,12 @@ func (c *Client) newMailMessage(mail Mail) mailMessage {
 	}
 }
 
+// SendMail sends single mail and returns the message id
+func (c *Client) SendMail(mail *Mail) (string, error) {
+	msg := c.newMailMessage(*mail)
+	return c.sendMessage(msg)
+}
+
 // SendMails sends multiple mails. If any errors are encountered, the error is saved and later returned.
 // Encountering errors does not stop later emails from being sent.
 func (c *Client) SendMails(mails ...*Mail) error {
@@ -34,7 +40,7 @@ func (c *Client) SendMails(mails ...*Mail) error {
 
 	for _, mail := range mails {
 		msg := c.newMailMessage(*mail)
-		if err := c.sendMessage(msg); err != nil {
+		if _, err := c.sendMessage(msg); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -55,19 +61,21 @@ type errorResponse struct {
 	} `json:"error"`
 }
 
-func (c *Client) sendMessage(msg mailMessage) error {
+func (c *Client) sendMessage(msg mailMessage) (string, error) {
 	req, err := c.generateSignedMessageRequest(msg)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return "", err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusAccepted {
-		return nil
+		messageID := resp.Header.Get("x-ms-request-id")
+		return messageID, nil
 	}
 
 	var (
@@ -75,12 +83,12 @@ func (c *Client) sendMessage(msg mailMessage) error {
 		errResp errorResponse
 	)
 	if _, err = b.ReadFrom(resp.Body); err != nil {
-		return err
+		return "", err
 	}
 
 	if err = json.Unmarshal(b.Bytes(), &errResp); err != nil {
-		return err
+		return "", err
 	}
 
-	return errors.New(errResp.Error.Message)
+	return "", errors.New(errResp.Error.Message)
 }
