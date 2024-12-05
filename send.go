@@ -48,17 +48,24 @@ func (c *Client) SendMails(mails ...*Mail) error {
 	return errors.Join(errs...)
 }
 
+type mailResponse struct {
+	ID    string              `json:"id"`
+	Error errorDetailResponse `json:"error"`
+}
+
 type errorResponse struct {
-	Error struct {
-		AdditionalInfo []struct {
-			Info any    `json:"info"`
-			Type string `json:"type"`
-		} `json:"additionalInfo"`
-		Code    string          `json:"code"`
-		Details []errorResponse `json:"details"`
-		Message string          `json:"message"`
-		Target  string          `json:"target"`
-	} `json:"error"`
+	Error errorDetailResponse `json:"error"`
+}
+
+type errorDetailResponse struct {
+	AdditionalInfo []struct {
+		Info any    `json:"info"`
+		Type string `json:"type"`
+	} `json:"additionalInfo"`
+	Code    string          `json:"code"`
+	Details []errorResponse `json:"details"`
+	Message string          `json:"message"`
+	Target  string          `json:"target"`
 }
 
 func (c *Client) sendMessage(msg mailMessage) (string, error) {
@@ -73,22 +80,31 @@ func (c *Client) sendMessage(msg mailMessage) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	var (
+		b         bytes.Buffer
+		mailResp  mailResponse
+		errorResp errorResponse
+	)
+
 	if resp.StatusCode == http.StatusAccepted {
-		messageID := resp.Header.Get("x-ms-request-id")
-		return messageID, nil
+		if _, err = b.ReadFrom(resp.Body); err != nil {
+			return "", err
+		}
+
+		if err = json.Unmarshal(b.Bytes(), &mailResp); err != nil {
+			return "", err
+		}
+
+		return mailResp.ID, nil
 	}
 
-	var (
-		b       bytes.Buffer
-		errResp errorResponse
-	)
 	if _, err = b.ReadFrom(resp.Body); err != nil {
 		return "", err
 	}
 
-	if err = json.Unmarshal(b.Bytes(), &errResp); err != nil {
+	if err = json.Unmarshal(b.Bytes(), &errorResp); err != nil {
 		return "", err
 	}
 
-	return "", errors.New(errResp.Error.Message)
+	return "", errors.New(errorResp.Error.Message)
 }
